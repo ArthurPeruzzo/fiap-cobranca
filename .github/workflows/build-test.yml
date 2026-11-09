@@ -1,0 +1,54 @@
+name: Build & Test
+
+on:
+  workflow_call:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 25
+      uses: actions/setup-java@v4
+      with:
+        java-version: '25'
+        distribution: 'temurin'
+        cache: maven
+    # `verify` roda os testes (Testcontainers: DynamoDB Local e RabbitMQ — o runner tem Docker), gera o relatório do
+    # JaCoCo e APLICA o mínimo de cobertura de 80% (jacoco:check). Abaixo disso o build — e o CI — falham.
+    - name: Build, testes e cobertura mínima
+      run: ./mvnw -B verify
+    - name: Resumo da cobertura
+      if: always()
+      run: |
+        if [ -f target/site/jacoco/jacoco.csv ]; then
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+        import csv
+        rows = list(csv.DictReader(open("target/site/jacoco/jacoco.csv")))
+        def pct(m, c):
+            mm = sum(int(r[m]) for r in rows); cc = sum(int(r[c]) for r in rows)
+            return f"{100*cc/(mm+cc):.1f}% ({cc}/{mm+cc})"
+        print("### Cobertura de testes (JaCoCo)")
+        print("")
+        print("| Contador | Cobertura |")
+        print("|---|---|")
+        print("| Linhas | " + pct("LINE_MISSED", "LINE_COVERED") + " |")
+        print("| Instruções | " + pct("INSTRUCTION_MISSED", "INSTRUCTION_COVERED") + " |")
+        print("| Branches | " + pct("BRANCH_MISSED", "BRANCH_COVERED") + " |")
+        print("")
+        print("Mínimo exigido: 80% das linhas.")
+        PY
+        fi
+    - name: Publicar o relatório de cobertura
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: jacoco-report
+        path: target/site/jacoco
+        if-no-files-found: ignore
+    - name: Empacotar
+      run: ./mvnw -B package -DskipTests

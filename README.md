@@ -46,3 +46,23 @@ resposta à OS (útil se a publicação falhou); decisão contrária à já grav
 | `DYNAMODB_ENDPOINT`, `DYNAMODB_CRIAR_TABELA=true` | só local: aponta para o DynamoDB Local e cria a tabela |
 
 Chave da tabela: `ordemServicoId` (número). Testes: `./mvnw verify` (precisa de Docker: sobe DynamoDB Local e RabbitMQ).
+
+## Infraestrutura e deploy
+
+Segue o molde do `fiap-estoque` (ver `docs/adr/0001-infraestrutura-propria-e-dynamodb.md`):
+
+- `Dockerfile` e `docker-compose.yml` (a cobrança + DynamoDB Local; o broker sobe no compose do `fiap-mecanica`):
+  `cp .env.example .env`, preencher `JWT_SECRET` e a senha do usuário `cobranca`, `docker compose up --build`.
+- `infra/terraform/app-infra`: ECR e tabela DynamoDB (`cobranca-pagamento`), state próprio no bucket `fiap-mecanica`.
+- `k8s/`: namespace `fiap-cobranca`, Deployment (porta 8082), Service `LoadBalancer` e HPA.
+- `.github/workflows`: `ci.yml` (PR: testes, cobertura, build da imagem, `terraform plan`) e `cd.yml` (main: testes → Terraform →
+  imagem no ECR → deploy). Antes do primeiro deploy, rode o CD do `fiap-estoque`: ele cria o broker e o usuário `cobranca`.
+
+| GitHub Secret | Para quê |
+|---|---|
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Credenciais da Academy Lab (`scripts/refresh-aws-secrets.sh` as republica). |
+| `JWT_SECRET` | O mesmo do `fiap-mecanica`. |
+| `RABBITMQ_COBRANCA_PASSWORD` | O mesmo do `fiap-estoque` (que cria o usuário no broker). |
+| `NEW_RELIC_LICENSE_KEY` | Observabilidade. |
+
+Os pods acessam o DynamoDB pelas credenciais da `LabRole` dos nós (IMDS), sem role dedicada.

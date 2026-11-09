@@ -1,0 +1,16 @@
+# LoadBalancer: so as rotas /pagamentos/** (consulta e decisao simulada) precisam ser alcancadas de fora, pelo
+# API Gateway. O consumo do comando de pagamento e a resposta a OS passam pelo broker, nao por HTTP.
+# Como o ELB e publico, o que protege /pagamentos/** e o JWT da API principal (perfil ATENDENTE ou ADMINISTRADOR).
+apiVersion: v1
+kind: Service
+metadata:
+  name: fiap-cobranca
+  namespace: fiap-cobranca
+spec:
+  type: LoadBalancer
+  selector:
+    app: fiap-cobranca
+  ports:
+    - port: 80
+      targetPort: 8082
+      protocol: TCP

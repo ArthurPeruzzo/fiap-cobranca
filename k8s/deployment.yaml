@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fiap-cobranca
+  namespace: fiap-cobranca
+  labels:
+    app: fiap-cobranca
+spec:
+  selector:
+    matchLabels:
+      app: fiap-cobranca
+  template:
+    metadata:
+      labels:
+        app: fiap-cobranca
+    spec:
+      containers:
+        - name: fiap-cobranca
+          # Placeholder: o cd.yml troca pela imagem versionada publicada no ECR (kubectl set image).
+          image: "fiap-cobranca:placeholder"
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: fiap-cobranca-config
+            - secretRef:
+                name: fiap-cobranca-secret
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "768Mi"
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+            failureThreshold: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8082
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+            periodSeconds: 10
