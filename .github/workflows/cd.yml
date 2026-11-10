@@ -1,0 +1,211 @@
+# CD — roda a cada push na main (ou seja, pós-merge de PR). Testa, aplica a infra própria do serviço
+# (Terraform: ECR + tabela DynamoDB), publica a imagem versionada e faz o deploy no cluster EKS.
+#
+# Pré-requisitos:
+# - o cluster precisa existir (o CD do fiap-mecanica-infra-k8s roda antes numa conta zerada);
+# - o broker RabbitMQ e o usuário `cobranca` são criados pelo CD do fiap-estoque (com o mesmo secret
+#   RABBITMQ_COBRANCA_PASSWORD usado aqui): rode o CD do estoque antes do primeiro deploy da cobrança.
+
+name: CD
+
+on:
+  push:
+    branches: [ "main" ]
+
+concurrency:
+  group: cd-${{ github.ref }}
+  # false de propósito: este workflow muda infraestrutura real (terraform apply, kubectl apply). Cancelar
+  # no meio pode deixar o state (sem lock) ou o cluster num estado parcialmente aplicado.
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+
+  # Nada é publicado nem aplicado se os testes ou o mínimo de 80% de cobertura falharem.
+  build-test:
+    uses: ./.github/workflows/build-test.yml
+
+  # Infra PRÓPRIA da cobrança (infra/terraform/app-infra): repositório ECR e tabela DynamoDB.
+  app-infra-apply:
+    needs: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: producao
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: infra/terraform/app-infra
+    outputs:
+      ecr_repo: ${{ steps.tf_outputs.outputs.ecr_repo }}
+      cluster_name: ${{ steps.tf_outputs.outputs.cluster_name }}
+      dynamodb_table: ${{ steps.tf_outputs.outputs.dynamodb_table }}
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+        aws-region: ${{ env.AWS_REGION }}
+    # O bucket do backend é criado pelo CD do fiap-mecanica-infra-k8s. Passo idempotente aqui como rede de
+    # segurança: sem ele, um `terraform init` num bucket ainda inexistente derruba o pipeline.
+    - name: Garantir que o bucket do backend existe (idempotente)
+      run: |
+        aws s3api head-bucket --bucket fiap-mecanica --region ${{ env.AWS_REGION }} 2>/dev/null || \
+        aws s3api create-bucket --bucket fiap-mecanica --region ${{ env.AWS_REGION }}
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+    - name: Terraform init
+      run: terraform init
+    - name: Terraform apply
+      run: terraform apply -auto-approve
+    - name: Capturar outputs do Terraform
+      id: tf_outputs
+      run: |
+        echo "ecr_repo=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+        echo "cluster_name=$(terraform output -raw eks_cluster_name)" >> "$GITHUB_OUTPUT"
+        echo "dynamodb_table=$(terraform output -raw dynamodb_table_name)" >> "$GITHUB_OUTPUT"
+
+  docker-build-push:
+    # precisa do app-infra-apply: o ECR só existe depois que o apply terminar.
+    needs: [build-test, app-infra-apply]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: producao
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 25
+      uses: actions/setup-java@v4
+      with:
+        java-version: '25'
+        distribution: 'temurin'
+        cache: maven
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+        aws-region: ${{ env.AWS_REGION }}
+    - name: Login no ECR
+      uses: aws-actions/amazon-ecr-login@v2
+    - name: Ler versão do pom.xml
+      id: get_version
+      run: echo "version=$(./mvnw -q -Dexpression=project.version -DforceStdout help:evaluate)" >> "$GITHUB_OUTPUT"
+    - name: Impedir sobrescrita de uma tag já publicada
+      run: |
+        if aws ecr describe-images \
+            --repository-name fiap-cobranca \
+            --region ${{ env.AWS_REGION }} \
+            --image-ids imageTag=${{ steps.get_version.outputs.version }} > /dev/null 2>&1; then
+          echo "::error::Tag ${{ steps.get_version.outputs.version }} já existe no ECR. Bump a versão em pom.xml antes de dar merge na main."
+          exit 1
+        fi
+    - name: Build da imagem
+      run: docker build -t ${{ needs.app-infra-apply.outputs.ecr_repo }}:${{ steps.get_version.outputs.version }} .
+    - name: Push da imagem
+      run: docker push ${{ needs.app-infra-apply.outputs.ecr_repo }}:${{ steps.get_version.outputs.version }}
+
+  k8s-deploy:
+    needs: [docker-build-push, app-infra-apply]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: producao
+    permissions:
+      contents: read
+    env:
+      EKS_CLUSTER_NAME: ${{ needs.app-infra-apply.outputs.cluster_name }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      RABBITMQ_COBRANCA_PASSWORD: ${{ secrets.RABBITMQ_COBRANCA_PASSWORD }}
+      NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+    outputs:
+      # Hostname do ELB do Service — consumido pelo dono do API Gateway para rotear /pagamentos.
+      lb_hostname: ${{ steps.wait_lb.outputs.hostname }}
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+        aws-region: ${{ env.AWS_REGION }}
+    - name: Apontar kubectl para o cluster EKS
+      run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region ${{ env.AWS_REGION }}
+    # Os pods ficam um salto de rede além da instância e usam as credenciais da LabRole pelo IMDS (para o DynamoDB).
+    # Com IMDSv2 obrigatório e hop limit 1 (o padrão destes nós) elas não chegam ao pod. Hop limit 2 resolve; o passo é
+    # idempotente (só altera instâncias abaixo de 2), igual ao do CD do fiap-estoque.
+    - name: Garantir o hop limit 2 do IMDS nos nós do cluster (idempotente)
+      run: |
+        IDS=$(aws ec2 describe-instances --region ${{ env.AWS_REGION }} \
+          --filters "Name=tag:eks:cluster-name,Values=$EKS_CLUSTER_NAME" "Name=instance-state-name,Values=running" \
+          --query 'Reservations[].Instances[] | [?MetadataOptions.HttpPutResponseHopLimit < `2`].InstanceId' --output text)
+        if [ -z "$IDS" ]; then
+          echo "Todos os nós já têm hop limit >= 2."
+          exit 0
+        fi
+        for ID in $IDS; do
+          echo "Ajustando o hop limit do IMDS de $ID para 2"
+          aws ec2 modify-instance-metadata-options --region ${{ env.AWS_REGION }} \
+            --instance-id "$ID" --http-put-response-hop-limit 2 > /dev/null
+        done
+    - name: Aplicar namespace
+      run: kubectl apply -f k8s/namespace.yaml
+    - name: Gerar e aplicar o Secret (a partir dos GitHub Secrets, sem gravar em disco)
+      run: |
+        kubectl create secret generic fiap-cobranca-secret -n fiap-cobranca \
+          --from-literal=JWT_SECRET="$JWT_SECRET" \
+          --from-literal=RABBITMQ_USERNAME="cobranca" \
+          --from-literal=RABBITMQ_PASSWORD="$RABBITMQ_COBRANCA_PASSWORD" \
+          --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
+          --dry-run=client -o yaml | kubectl apply -f -
+    - name: Aplicar Service (antes do Deployment — só assim dá pra descobrir o hostname do LoadBalancer sem subir pods com config incompleta)
+      run: kubectl apply -f k8s/service.yaml
+    - name: Aguardar hostname do LoadBalancer
+      id: wait_lb
+      run: |
+        kubectl wait --for=jsonpath='{.status.loadBalancer.ingress[0].hostname}' \
+          service/fiap-cobranca -n fiap-cobranca --timeout=180s
+        echo "hostname=$(kubectl get svc fiap-cobranca -n fiap-cobranca -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')" >> "$GITHUB_OUTPUT"
+    - name: Gerar ConfigMap (DynamoDB, broker e URL pública do Swagger, numa única passada)
+      env:
+        DYNAMODB_TABELA: ${{ needs.app-infra-apply.outputs.dynamodb_table }}
+        LB_HOSTNAME: ${{ steps.wait_lb.outputs.hostname }}
+      run: |
+        kubectl create configmap fiap-cobranca-config -n fiap-cobranca \
+          --from-literal=AWS_REGION="${{ env.AWS_REGION }}" \
+          --from-literal=DYNAMODB_TABELA="${DYNAMODB_TABELA}" \
+          --from-literal=PUBLIC_BASE_URL="http://${LB_HOSTNAME}" \
+          --from-literal=RABBITMQ_HOST="rabbitmq.mensageria.svc.cluster.local" \
+          --from-literal=RABBITMQ_PORT="5672" \
+          --from-literal=RABBITMQ_VHOST="fiap" \
+          --dry-run=client -o yaml | kubectl apply -f -
+    - name: Aplicar Deployment (pods já nascem com a config completa)
+      run: kubectl apply -f k8s/deployment.yaml
+    - name: Definir a versão da imagem publicada nesta run
+      run: kubectl set image deployment/fiap-cobranca fiap-cobranca=${{ needs.app-infra-apply.outputs.ecr_repo }}:${{ needs.docker-build-push.outputs.version }} -n fiap-cobranca
+    - name: Aplicar HPA
+      run: kubectl apply -f k8s/hpa.yaml
+    - name: Aguardar rollout
+      run: kubectl rollout status deployment/fiap-cobranca -n fiap-cobranca --timeout=300s
+    - name: Publicar os endereços no resumo da run
+      env:
+        LB_HOSTNAME: ${{ steps.wait_lb.outputs.hostname }}
+      run: |
+        {
+          echo "### fiap-cobranca"
+          echo ""
+          echo "- ELB (rotas /pagamentos, via API Gateway): \`http://${LB_HOSTNAME}\`"
+          echo "- Swagger: \`http://${LB_HOSTNAME}/swagger-ui.html\`"
+        } >> "$GITHUB_STEP_SUMMARY"
