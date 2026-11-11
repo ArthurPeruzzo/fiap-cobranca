@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.fiap</groupId>
 	<artifactId>cobranca</artifactId>
-	<version>1.0.1</version>
+	<version>1.0.2</version>
 	<name>cobranca</name>
 	<description>Microsserviço de cobrança da Mecânica FIAP</description>
 	<properties>

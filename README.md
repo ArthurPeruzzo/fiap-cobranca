@@ -1,5 +1,7 @@
 # fiap-cobranca
 
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ArthurPeruzzo_fiap-cobranca&metric=alert_status)](https://sonarcloud.io/project/overview?id=ArthurPeruzzo_fiap-cobranca) [![Cobertura](https://sonarcloud.io/api/project_badges/measure?project=ArthurPeruzzo_fiap-cobranca&metric=coverage)](https://sonarcloud.io/project/overview?id=ArthurPeruzzo_fiap-cobranca)
+
 Microsserviço de cobrança da Mecânica FIAP (Fase 4).
 
 ## O que o serviço faz
@@ -19,7 +21,7 @@ Regra de negócio e meio de pagamento são separados: os casos de uso só conhec
 ### Papel na saga
 
 A saga de pagamento é **orquestrada pelo `fiap-mecanica`** (decisão e justificativa no
-[ADR-0009](../fiap-mecanica/docs/adr/0009-saga-de-pagamento-orquestrada.md)): ele grava o comando de pagamento na outbox e reage às
+[ADR-0009](https://github.com/ArthurPeruzzo/fiap-mecanica/blob/main/docs/adr/0009-saga-de-pagamento-orquestrada.md)): ele grava o comando de pagamento na outbox e reage às
 respostas. A cobrança é **participante**: recebe o comando, guarda o pagamento e responde `pagamento.confirmado` ou
 `pagamento.recusado`. Cobra-se primeiro e baixa-se o estoque depois, então a compensação de um pagamento recusado é só liberar
 a reserva e cancelar a OS; não existe estorno.
@@ -109,7 +111,7 @@ Os pods acessam o DynamoDB pelas credenciais da `LabRole` dos nós (IMDS), sem r
 O `build-test` do CI (pull request) roda `./mvnw verify` — testes, relatório do JaCoCo e mínimo de 80% de cobertura — e depois a
 análise do **SonarCloud** (plano gratuito, repositório público) sobre as classes e o relatório já gerados. O passo usa
 `-Dsonar.qualitygate.wait=true`: se o Quality Gate falhar, o pipeline falha. A configuração está nas propriedades `sonar.*` do
-`pom.xml` (projeto `ArthurPeruzzo_fiap-cobranca`).
+`pom.xml` (projeto `ArthurPeruzzo_fiap-cobranca`). Resultado: [painel do projeto no SonarCloud](https://sonarcloud.io/project/overview?id=ArthurPeruzzo_fiap-cobranca) (Quality Gate e cobertura da `main`; os pull requests têm a própria análise).
 
 Configuração única, fora do repositório: criar a organização e importar este repositório em <https://sonarcloud.io>, conferir a
 *organization key* e a *project key* (devem bater com o `pom.xml`) e cadastrar o secret **`SONAR_TOKEN`** no repositório. Enquanto o
