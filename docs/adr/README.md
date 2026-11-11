@@ -2,7 +2,7 @@
 
 Decisões arquiteturais deste serviço. As decisões do ecossistema (saga de pagamento orquestrada, token de serviço, mensageria com
 outbox) estão nos ADRs do repositório `fiap-mecanica`, em especial o
-[ADR-0009](../../../fiap-mecanica/docs/adr/0009-saga-de-pagamento-orquestrada.md).
+[ADR-0009](https://github.com/ArthurPeruzzo/fiap-mecanica/blob/main/docs/adr/0009-saga-de-pagamento-orquestrada.md).
 
 | ADR | Decisão | Status |
 |---|---|---|
