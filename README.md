@@ -16,6 +16,14 @@ Regra de negócio e meio de pagamento são separados: os casos de uso só conhec
 (`iniciarCobranca`) e `DecidirPagamentoUseCase`. Hoje o meio é **simulado** (`GatewayDePagamentoSimulado`); um meio real
 (Mercado Pago) entra como outro bean da porta, chamando o mesmo `DecidirPagamentoUseCase` a partir do seu webhook.
 
+### Papel na saga
+
+A saga de pagamento é **orquestrada pelo `fiap-mecanica`** (decisão e justificativa no
+[ADR-0009](../fiap-mecanica/docs/adr/0009-saga-de-pagamento-orquestrada.md)): ele grava o comando de pagamento na outbox e reage às
+respostas. A cobrança é **participante**: recebe o comando, guarda o pagamento e responde `pagamento.confirmado` ou
+`pagamento.recusado`. Cobra-se primeiro e baixa-se o estoque depois, então a compensação de um pagamento recusado é só liberar
+a reserva e cancelar a OS; não existe estorno.
+
 ### Endpoints
 
 Todos exigem JWT da API principal (mesmo segredo/issuer) com perfil `ATENDENTE` ou `ADMINISTRADOR`; qualquer outra rota é negada.
@@ -47,6 +55,28 @@ resposta à OS (útil se a publicação falhou); decisão contrária à já grav
 
 Chave da tabela: `ordemServicoId` (número). Testes: `./mvnw verify` (precisa de Docker: sobe DynamoDB Local e RabbitMQ).
 
+## Arquitetura
+
+Clean Architecture, igual ao `fiap-estoque` e ao `fiap-mecanica`: `core/` (domínio, casos de uso e portas) sem Spring nem AWS, e
+`infra/` com os detalhes. Pacote raiz `com.fiap.cobranca`.
+
+- `core/domain`: `Pagamento` e `StatusPagamento` (`PENDENTE`, `CONFIRMADO`, `RECUSADO`).
+- `core/gateway`: portas `PagamentoGateway` (persistência), `PagamentoEventosGateway` (resposta à OS) e `GatewayDePagamento` (meio de pagamento).
+- `core/usecase`: `SolicitarPagamentoUseCase`, `ConsultarPagamentoUseCase` e `DecidirPagamentoUseCase`, com `OutputPort` para devolver o resultado.
+- `core/dto`: dados de entrada dos casos de uso.
+- `infra/controller`: `PagamentoHttpController` e `PagamentoSimuladoHttpController` (Spring, rotas HTTP) chamam o `PagamentoCleanController`
+  (Java puro), que monta os casos de uso e devolve o resultado por *presenter* (`infra/controller/presenter`) em um `json/PagamentoResponseJson`.
+- `infra/mensageria`: listener do comando (`SolicitarPagamentoListener`, que usa o mesmo `PagamentoCleanController`) e publicador das respostas.
+- `infra/gateway`: DynamoDB (`PagamentoDynamoGateway`) e o meio de pagamento simulado.
+- `shared`: exceções, segurança JWT e OpenAPI.
+
+## Testes e cobertura
+
+`./mvnw verify` roda os testes unitários e os de integração (Testcontainers: DynamoDB Local e RabbitMQ, inclui o fluxo completo da
+saga de pagamento), gera o relatório do JaCoCo e **falha abaixo de 80% de linhas**. Medição de 10/11/2026: **47 testes, 0 falhas,
+97,7% das linhas cobertas** (297/304). Relatório em `target/site/jacoco/index.html`; no CI o resumo aparece na execução e o
+relatório HTML é publicado como artefato (`jacoco-report`).
+
 ## Infraestrutura e deploy
 
 Segue o molde do `fiap-estoque` (ver `docs/adr/0001-infraestrutura-propria-e-dynamodb.md`):
@@ -55,8 +85,9 @@ Segue o molde do `fiap-estoque` (ver `docs/adr/0001-infraestrutura-propria-e-dyn
   `cp .env.example .env`, preencher `JWT_SECRET` e a senha do usuário `cobranca`, `docker compose up --build`.
 - `infra/terraform/app-infra`: ECR e tabela DynamoDB (`cobranca-pagamento`), state próprio no bucket `fiap-mecanica`.
 - `k8s/`: namespace `fiap-cobranca`, Deployment (porta 8082), Service `LoadBalancer` e HPA.
-- `.github/workflows`: `ci.yml` (PR: testes, cobertura, build da imagem, `terraform plan`) e `cd.yml` (main: testes → Terraform →
-  imagem no ECR → deploy). Antes do primeiro deploy, rode o CD do `fiap-estoque`: ele cria o broker e o usuário `cobranca`.
+- `.github/workflows`: `ci.yml` (PR: testes, cobertura de 80%, Sonar, build da imagem, `terraform plan`) e `cd.yml` (main: Terraform →
+  imagem no ECR → deploy). Os testes rodam só no CI: a `main` é protegida e só recebe merge de PR com o check `build-test` verde.
+  Antes do primeiro deploy, rode o CD do `fiap-estoque`: ele cria o broker e o usuário `cobranca`.
 
 | GitHub Secret | Para quê |
 |---|---|
@@ -64,12 +95,13 @@ Segue o molde do `fiap-estoque` (ver `docs/adr/0001-infraestrutura-propria-e-dyn
 | `JWT_SECRET` | O mesmo do `fiap-mecanica`. |
 | `RABBITMQ_COBRANCA_PASSWORD` | O mesmo do `fiap-estoque` (que cria o usuário no broker). |
 | `NEW_RELIC_LICENSE_KEY` | Observabilidade. |
+| `SONAR_TOKEN` | Token do SonarCloud para a análise de qualidade no CI (ver abaixo). |
 
 Os pods acessam o DynamoDB pelas credenciais da `LabRole` dos nós (IMDS), sem role dedicada.
 
 ## Qualidade de código (SonarCloud)
 
-O `build-test` (usado por CI e CD) roda `./mvnw verify` — testes, relatório do JaCoCo e mínimo de 80% de cobertura — e depois a
+O `build-test` do CI (pull request) roda `./mvnw verify` — testes, relatório do JaCoCo e mínimo de 80% de cobertura — e depois a
 análise do **SonarCloud** (plano gratuito, repositório público) sobre as classes e o relatório já gerados. O passo usa
 `-Dsonar.qualitygate.wait=true`: se o Quality Gate falhar, o pipeline falha. A configuração está nas propriedades `sonar.*` do
 `pom.xml` (projeto `ArthurPeruzzo_fiap-cobranca`).

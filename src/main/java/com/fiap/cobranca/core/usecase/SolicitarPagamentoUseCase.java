@@ -1,10 +1,10 @@
 package com.fiap.cobranca.core.usecase;
 
 import com.fiap.cobranca.core.domain.Pagamento;
+import com.fiap.cobranca.core.dto.SolicitarPagamentoDto;
 import com.fiap.cobranca.core.gateway.GatewayDePagamento;
 import com.fiap.cobranca.core.gateway.PagamentoGateway;
 
-import java.math.BigDecimal;
 import java.time.Clock;
 
 /** Registra o pagamento PENDENTE da OS e o inicia no meio de pagamento. Idempotente: repetir não cria outro. */
@@ -21,8 +21,8 @@ public class SolicitarPagamentoUseCase {
     }
 
     /** @return true se criou o pagamento; false se já existia (mensagem duplicada). */
-    public boolean executar(Long ordemServicoId, Long clienteId, BigDecimal valor) {
-        Pagamento pagamento = Pagamento.novo(ordemServicoId, clienteId, valor, clock.instant());
+    public boolean solicitar(SolicitarPagamentoDto dto) {
+        Pagamento pagamento = Pagamento.novo(dto.ordemServicoId(), dto.clienteId(), dto.valor(), clock.instant());
         if (!pagamentoGateway.criarSeNaoExistir(pagamento)) {
             return false;
         }

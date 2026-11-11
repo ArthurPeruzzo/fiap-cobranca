@@ -1,5 +1,6 @@
 package com.fiap.cobranca.core.usecase;
 
+import com.fiap.cobranca.core.dto.SolicitarPagamentoDto;
 import com.fiap.cobranca.core.domain.Pagamento;
 import com.fiap.cobranca.core.domain.StatusPagamento;
 import com.fiap.cobranca.core.gateway.GatewayDePagamento;
@@ -41,7 +42,7 @@ class SolicitarPagamentoUseCaseUnitTest {
     void shouldCriarPagamentoPendenteEIniciarACobranca() {
         when(pagamentoGateway.criarSeNaoExistir(any())).thenReturn(true);
 
-        assertTrue(useCase.executar(1L, 2L, new BigDecimal("99.90")));
+        assertTrue(useCase.solicitar(new SolicitarPagamentoDto(1L, 2L, new BigDecimal("99.90"))));
 
         ArgumentCaptor<Pagamento> captor = ArgumentCaptor.forClass(Pagamento.class);
         verify(pagamentoGateway).criarSeNaoExistir(captor.capture());
@@ -54,14 +55,14 @@ class SolicitarPagamentoUseCaseUnitTest {
     void shouldIgnorarComandoRepetidoSemIniciarOutraCobranca() {
         when(pagamentoGateway.criarSeNaoExistir(any())).thenReturn(false);
 
-        assertFalse(useCase.executar(1L, 2L, BigDecimal.TEN));
+        assertFalse(useCase.solicitar(new SolicitarPagamentoDto(1L, 2L, BigDecimal.TEN)));
 
         verify(gatewayDePagamento, never()).iniciarCobranca(any());
     }
 
     @Test
     void shouldRejeitarComandoInvalidoSemTocarNoBanco() {
-        assertThrows(IllegalArgumentException.class, () -> useCase.executar(1L, 2L, BigDecimal.ZERO));
+        assertThrows(IllegalArgumentException.class, () -> useCase.solicitar(new SolicitarPagamentoDto(1L, 2L, BigDecimal.ZERO)));
 
         verifyNoInteractions(pagamentoGateway, gatewayDePagamento);
     }
