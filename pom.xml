@@ -18,6 +18,12 @@
 		<jacoco.cobertura.minima>0.80</jacoco.cobertura.minima>
 		<awssdk.version>2.33.0</awssdk.version>
 		<testcontainers.version>1.21.4</testcontainers.version>
+			<!-- SonarCloud (gratuito para repositorios publicos). CONFIRMAR organization e projectKey no painel do SonarCloud:
+		     o padrao e <login-github-em-minusculas>_<repo>. O token vai no secret SONAR_TOKEN do repositorio. -->
+		<sonar.host.url>https://sonarcloud.io</sonar.host.url>
+		<sonar.organization>arthurperuzzo</sonar.organization>
+		<sonar.projectKey>ArthurPeruzzo_fiap-cobranca</sonar.projectKey>
+		<sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
 	</properties>
 	<dependencyManagement>
 		<dependencies>

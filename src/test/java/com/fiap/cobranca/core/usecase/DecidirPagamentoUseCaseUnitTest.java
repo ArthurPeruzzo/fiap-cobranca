@@ -24,6 +24,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 
 @ExtendWith(MockitoExtension.class)
 class DecidirPagamentoUseCaseUnitTest {
@@ -33,11 +34,12 @@ class DecidirPagamentoUseCaseUnitTest {
 
     @Mock private PagamentoGateway pagamentoGateway;
     @Mock private PagamentoEventosGateway eventosGateway;
+    @Mock private DecidirPagamentoOutputPort outputPort;
     private DecidirPagamentoUseCase useCase;
 
     @BeforeEach
     void setup() {
-        useCase = new DecidirPagamentoUseCase(pagamentoGateway, eventosGateway, Clock.fixed(AGORA, ZoneOffset.UTC));
+        useCase = new DecidirPagamentoUseCase(pagamentoGateway, eventosGateway, Clock.fixed(AGORA, ZoneOffset.UTC), outputPort);
     }
 
     private static Pagamento com(StatusPagamento status) {
@@ -49,9 +51,9 @@ class DecidirPagamentoUseCaseUnitTest {
         when(pagamentoGateway.buscar(OS)).thenReturn(Optional.of(com(StatusPagamento.PENDENTE)), Optional.of(com(StatusPagamento.CONFIRMADO)));
         when(pagamentoGateway.transicionar(OS, StatusPagamento.PENDENTE, StatusPagamento.CONFIRMADO, AGORA)).thenReturn(true);
 
-        Pagamento resultado = useCase.confirmar(OS);
+        useCase.confirmar(OS);
 
-        assertEquals(StatusPagamento.CONFIRMADO, resultado.status());
+        verify(outputPort).apresentar(argThat(p -> p.status() == StatusPagamento.CONFIRMADO));
         verify(eventosGateway).pagamentoConfirmado(OS);
         verify(eventosGateway, never()).pagamentoRecusado(any());
     }
@@ -61,8 +63,9 @@ class DecidirPagamentoUseCaseUnitTest {
         when(pagamentoGateway.buscar(OS)).thenReturn(Optional.of(com(StatusPagamento.PENDENTE)), Optional.of(com(StatusPagamento.RECUSADO)));
         when(pagamentoGateway.transicionar(OS, StatusPagamento.PENDENTE, StatusPagamento.RECUSADO, AGORA)).thenReturn(true);
 
-        assertEquals(StatusPagamento.RECUSADO, useCase.recusar(OS).status());
+        useCase.recusar(OS);
 
+        verify(outputPort).apresentar(argThat(p -> p.status() == StatusPagamento.RECUSADO));
         verify(eventosGateway).pagamentoRecusado(OS);
         verify(eventosGateway, never()).pagamentoConfirmado(any());
     }
@@ -75,6 +78,7 @@ class DecidirPagamentoUseCaseUnitTest {
 
         verify(pagamentoGateway, never()).transicionar(any(), any(), any(), any());
         verify(eventosGateway).pagamentoConfirmado(OS);
+        verify(outputPort).apresentar(argThat(p -> p.status() == StatusPagamento.CONFIRMADO));
     }
 
     @Test
@@ -83,7 +87,7 @@ class DecidirPagamentoUseCaseUnitTest {
 
         assertThrows(PagamentoJaDecididoException.class, () -> useCase.recusar(OS));
 
-        verifyNoInteractions(eventosGateway);
+        verifyNoInteractions(eventosGateway, outputPort);
     }
 
     @Test
@@ -93,7 +97,7 @@ class DecidirPagamentoUseCaseUnitTest {
 
         assertThrows(PagamentoJaDecididoException.class, () -> useCase.confirmar(OS));
 
-        verifyNoInteractions(eventosGateway);
+        verifyNoInteractions(eventosGateway, outputPort);
     }
 
     @Test

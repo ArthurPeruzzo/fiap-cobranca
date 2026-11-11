@@ -22,22 +22,25 @@ public class DecidirPagamentoUseCase {
     private final PagamentoGateway pagamentoGateway;
     private final PagamentoEventosGateway eventosGateway;
     private final Clock clock;
+    private final DecidirPagamentoOutputPort outputPort;
 
-    public DecidirPagamentoUseCase(PagamentoGateway pagamentoGateway, PagamentoEventosGateway eventosGateway, Clock clock) {
+    public DecidirPagamentoUseCase(PagamentoGateway pagamentoGateway, PagamentoEventosGateway eventosGateway, Clock clock,
+                                   DecidirPagamentoOutputPort outputPort) {
         this.pagamentoGateway = pagamentoGateway;
         this.eventosGateway = eventosGateway;
         this.clock = clock;
+        this.outputPort = outputPort;
     }
 
-    public Pagamento confirmar(Long ordemServicoId) {
-        return decidir(ordemServicoId, StatusPagamento.CONFIRMADO);
+    public void confirmar(Long ordemServicoId) {
+        decidir(ordemServicoId, StatusPagamento.CONFIRMADO);
     }
 
-    public Pagamento recusar(Long ordemServicoId) {
-        return decidir(ordemServicoId, StatusPagamento.RECUSADO);
+    public void recusar(Long ordemServicoId) {
+        decidir(ordemServicoId, StatusPagamento.RECUSADO);
     }
 
-    private Pagamento decidir(Long ordemServicoId, StatusPagamento alvo) {
+    private void decidir(Long ordemServicoId, StatusPagamento alvo) {
         Pagamento atual = pagamentoGateway.buscar(ordemServicoId)
                 .orElseThrow(() -> new PagamentoNaoEncontradoException(ordemServicoId));
 
@@ -57,6 +60,6 @@ public class DecidirPagamentoUseCase {
         } else {
             eventosGateway.pagamentoRecusado(ordemServicoId);
         }
-        return atual;
+        outputPort.apresentar(atual);
     }
 }

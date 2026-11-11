@@ -7,13 +7,16 @@ import com.fiap.cobranca.core.gateway.PagamentoGateway;
 public class ConsultarPagamentoUseCase {
 
     private final PagamentoGateway pagamentoGateway;
+    private final ConsultarPagamentoOutputPort outputPort;
 
-    public ConsultarPagamentoUseCase(PagamentoGateway pagamentoGateway) {
+    public ConsultarPagamentoUseCase(PagamentoGateway pagamentoGateway, ConsultarPagamentoOutputPort outputPort) {
         this.pagamentoGateway = pagamentoGateway;
+        this.outputPort = outputPort;
     }
 
-    public Pagamento executar(Long ordemServicoId) {
-        return pagamentoGateway.buscar(ordemServicoId)
+    public void consultar(Long ordemServicoId) {
+        Pagamento pagamento = pagamentoGateway.buscar(ordemServicoId)
                 .orElseThrow(() -> new PagamentoNaoEncontradoException(ordemServicoId));
+        outputPort.apresentar(pagamento);
     }
 }
