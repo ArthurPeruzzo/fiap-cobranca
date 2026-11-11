@@ -1,4 +1,5 @@
-# CD — roda a cada push na main (ou seja, pós-merge de PR). Testa, aplica a infra própria do serviço
+# CD — roda a cada push na main (ou seja, pós-merge de PR). Os testes, a cobertura e o Sonar rodam no CI do PR
+# (a main só aceita merge com o check `build-test / build-test` verde); aqui só se aplica a infra própria do serviço
 # (Terraform: ECR + tabela DynamoDB), publica a imagem versionada e faz o deploy no cluster EKS.
 #
 # Pré-requisitos:
@@ -23,13 +24,8 @@ env:
 
 jobs:
 
-  # Nada é publicado nem aplicado se os testes ou o mínimo de 80% de cobertura falharem.
-  build-test:
-    uses: ./.github/workflows/build-test.yml
-
   # Infra PRÓPRIA da cobrança (infra/terraform/app-infra): repositório ECR e tabela DynamoDB.
   app-infra-apply:
-    needs: build-test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: producao
@@ -73,7 +69,7 @@ jobs:
 
   docker-build-push:
     # precisa do app-infra-apply: o ECR só existe depois que o apply terminar.
-    needs: [build-test, app-infra-apply]
+    needs: app-infra-apply
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: producao

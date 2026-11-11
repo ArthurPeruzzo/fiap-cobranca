@@ -66,3 +66,15 @@ Segue o molde do `fiap-estoque` (ver `docs/adr/0001-infraestrutura-propria-e-dyn
 | `NEW_RELIC_LICENSE_KEY` | Observabilidade. |
 
 Os pods acessam o DynamoDB pelas credenciais da `LabRole` dos nós (IMDS), sem role dedicada.
+
+## Qualidade de código (SonarCloud)
+
+O `build-test` (usado por CI e CD) roda `./mvnw verify` — testes, relatório do JaCoCo e mínimo de 80% de cobertura — e depois a
+análise do **SonarCloud** (plano gratuito, repositório público) sobre as classes e o relatório já gerados. O passo usa
+`-Dsonar.qualitygate.wait=true`: se o Quality Gate falhar, o pipeline falha. A configuração está nas propriedades `sonar.*` do
+`pom.xml` (projeto `ArthurPeruzzo_fiap-cobranca`).
+
+Configuração única, fora do repositório: criar a organização e importar este repositório em <https://sonarcloud.io>, conferir a
+*organization key* e a *project key* (devem bater com o `pom.xml`) e cadastrar o secret **`SONAR_TOKEN`** no repositório. Enquanto o
+secret não existir (ou em PR de fork), o passo é pulado com um aviso e o restante do pipeline segue normalmente.
+

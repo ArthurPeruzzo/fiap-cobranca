@@ -9,9 +9,13 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # o Sonar usa o historico do git (blame) para atribuir issues e detectar codigo novo
     - name: Set up JDK 25
       uses: actions/setup-java@v4
       with:
@@ -50,5 +54,14 @@ jobs:
         name: jacoco-report
         path: target/site/jacoco
         if-no-files-found: ignore
+    # Verificação de qualidade (SonarCloud). Roda sobre as classes e o relatório do JaCoCo gerados pelo `verify` acima
+    # (não refaz os testes) e reprova o build se o Quality Gate falhar. Sem o secret SONAR_TOKEN (ex.: PR de fork, ou
+    # SonarCloud ainda não configurado) o passo é pulado com um aviso em vez de quebrar o pipeline.
+    - name: Análise de qualidade (SonarCloud)
+      if: env.SONAR_TOKEN != ''
+      run: ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751:sonar -Dsonar.qualitygate.wait=true
+    - name: Análise de qualidade pulada (sem SONAR_TOKEN)
+      if: env.SONAR_TOKEN == ''
+      run: echo "::warning::SONAR_TOKEN ausente - a análise do SonarCloud foi pulada nesta execução."
     - name: Empacotar
       run: ./mvnw -B package -DskipTests
