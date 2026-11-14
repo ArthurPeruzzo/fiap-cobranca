@@ -126,7 +126,7 @@ Os pods acessam o DynamoDB pelas credenciais da `LabRole` dos nós (IMDS), sem r
 ## Documentação da API e observabilidade
 
 - **Swagger:** `http://localhost:8082/swagger-ui.html` (local) ou o mesmo caminho no ELB do Service `fiap-cobranca`. O API Gateway roteia só `/pagamentos`, não a documentação.
-- **Traces e métricas** vão por OTLP para a New Relic (serviço `cobranca`; chave em `NEW_RELIC_LICENSE_KEY`), e os logs ECS carregam `traceId` e `spanId`. O comando `pagamento.solicitar` chega com o `traceparent` da mecanica e a resposta continua o mesmo trace (listener e template com `observation-enabled`), então aprovar o orçamento e registrar o pagamento `PENDENTE` aparecem juntos; a decisão do pagamento (`aprovar`/`recusar`) abre outro trace que segue pela mecanica até o estoque.
+- **Traces e métricas** vão por OTLP para a New Relic (serviço `cobranca`; chave em `NEW_RELIC_LICENSE_KEY`), e os logs ECS carregam `traceId` e `spanId`. O comando `pagamento.solicitar` chega com o `traceparent` da mecanica e a resposta continua o mesmo trace (listener e template com `observation-enabled`), e o meio de pagamento decide dentro desse consumo, então aprovar o orçamento, cobrar e baixar (ou liberar) o estoque aparecem num único trace. Só a decisão manual (`aprovar`/`recusar` de um pagamento `PENDENTE`) abre outro trace, que segue pela mecanica até o estoque.
 
 ## Qualidade de código (SonarCloud)
 
