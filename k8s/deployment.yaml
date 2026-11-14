@@ -39,13 +39,16 @@ spec:
               port: 8082
             failureThreshold: 30
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8082
             periodSeconds: 15
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: 8082
             periodSeconds: 10
+            timeoutSeconds: 5

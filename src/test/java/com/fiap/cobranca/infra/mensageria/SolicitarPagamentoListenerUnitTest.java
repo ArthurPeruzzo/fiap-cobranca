@@ -1,5 +1,6 @@
 package com.fiap.cobranca.infra.mensageria;
 
+import com.fiap.cobranca.core.domain.ResultadoCobranca;
 import com.fiap.cobranca.core.gateway.GatewayDePagamento;
 import com.fiap.cobranca.core.gateway.PagamentoEventosGateway;
 import com.fiap.cobranca.core.gateway.PagamentoGateway;
@@ -40,6 +41,7 @@ class SolicitarPagamentoListenerUnitTest {
     @Test
     void shouldRegistrarOPagamentoEIniciarACobranca() {
         when(pagamentoGateway.criarSeNaoExistir(any())).thenReturn(true);
+        when(gatewayDePagamento.iniciarCobranca(any())).thenReturn(ResultadoCobranca.PENDENTE);
 
         assertDoesNotThrow(() -> listener.solicitar(new SolicitarPagamentoComando(1L, 2L, BigDecimal.TEN)));
 

@@ -39,6 +39,8 @@ public class SecurityConfiguration {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(ENDPOINTS_SEM_AUTENTICACAO).permitAll()
+                        // Mock do meio de pagamento: faz a própria autenticação (secret -> token), como um meio externo.
+                        .requestMatchers("/mock-pagamentos/**").permitAll()
                         // Decidir pagamento (aprovar/recusar) e consultar: só equipe autenticada. Nunca público.
                         .requestMatchers("/pagamentos/**").hasAnyRole(ATENDENTE, ADMINISTRADOR)
                         .anyRequest().denyAll()
