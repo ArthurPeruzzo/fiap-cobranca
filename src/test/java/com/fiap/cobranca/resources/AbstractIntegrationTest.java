@@ -10,16 +10,20 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.ServerSocket;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 
 /**
  * Sobe um DynamoDB Local e um RabbitMQ de verdade (uma vez por execução) e o contexto completo da aplicação.
- * Todas as subclasses compartilham o mesmo contexto do Spring.
+ * Todas as subclasses compartilham o mesmo contexto do Spring. A porta é livre mas definida antes da partida, porque o
+ * meio de pagamento ({@code GatewayPagamentoHttp}) chama o mock deste mesmo serviço em {@code localhost:${server.port}}.
  */
 @ActiveProfiles("integration-test")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
 public abstract class AbstractIntegrationTest {
 
     protected static final String SEGREDO = "fIACMIxZHpR5rhnyNTLfwJZOgDtZZVweeS1eRWuT6IZ_U5cRrinFFHJAeSHMpvPKHG_KLM-JTelvD5s3ulA";
@@ -29,6 +33,7 @@ public abstract class AbstractIntegrationTest {
             .withCommand("-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb")
             .waitingFor(Wait.forListeningPort());
     private static final RabbitMQContainer rabbit = new RabbitMQContainer("rabbitmq:4.1-management");
+    protected static final int PORTA = portaLivre();
 
     static {
         dynamo.start();
@@ -37,12 +42,22 @@ public abstract class AbstractIntegrationTest {
 
     @DynamicPropertySource
     static void propriedades(DynamicPropertyRegistry registry) {
+        registry.add("server.port", () -> PORTA);
+        registry.add("resilience4j.retry.instances.gatewayPagamento.wait-duration", () -> "10ms");
         registry.add("cobranca.dynamodb.endpoint", AbstractIntegrationTest::endpointDoDynamo);
         registry.add("spring.rabbitmq.host", rabbit::getHost);
         registry.add("spring.rabbitmq.port", rabbit::getAmqpPort);
         registry.add("spring.rabbitmq.virtual-host", () -> "/");
         registry.add("spring.rabbitmq.username", rabbit::getAdminUsername);
         registry.add("spring.rabbitmq.password", rabbit::getAdminPassword);
+    }
+
+    private static int portaLivre() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     protected static String endpointDoDynamo() {

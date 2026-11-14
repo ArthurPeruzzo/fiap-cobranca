@@ -7,3 +7,4 @@ outbox) estão nos ADRs do repositório `fiap-mecanica`, em especial o
 | ADR | Decisão | Status |
 |---|---|---|
 | [0001](0001-infraestrutura-propria-e-dynamodb.md) | Infraestrutura própria da cobrança: DynamoDB, imagem, manifestos e pipelines no repositório | Aceito |
+| [0002](0002-mock-do-meio-de-pagamento.md) | Mock como meio de pagamento (secret → token → pagamento) e adapter HTTP com Retry e CircuitBreaker | Aceito |

@@ -11,12 +11,31 @@ Participa da saga de pagamento da ordem de serviço (orquestrada pelo `fiap-meca
 1. Consome o comando `pagamento.solicitar` (fila `cobranca.solicitar-pagamento`, exchange `cobranca.comandos`) com
    `{ordemServicoId, clienteId, valor}` e grava o pagamento **PENDENTE** no DynamoDB (escrita condicional: repetir a mensagem
    não cria outro).
-2. Alguém decide o pagamento (aprovar ou recusar). A cobrança grava o status e responde no exchange `ordemservico.eventos`
+2. Chama o meio de pagamento (hoje o mock, abaixo), que aprova ou recusa; se ele estiver fora, o pagamento segue PENDENTE e a
+   equipe decide à mão (aprovar ou recusar). A cobrança grava o status e responde no exchange `ordemservico.eventos`
    com `pagamento.confirmado` ou `pagamento.recusado` (`{"ordemServicoId":N}`), só depois da confirmação do broker.
 
 Regra de negócio e meio de pagamento são separados: os casos de uso só conhecem a porta `GatewayDePagamento`
-(`iniciarCobranca`) e `DecidirPagamentoUseCase`. Hoje o meio é **simulado** (`GatewayDePagamentoSimulado`); um meio real
-(Mercado Pago) entra como outro bean da porta, chamando o mesmo `DecidirPagamentoUseCase` a partir do seu webhook.
+(`iniciarCobranca`, que devolve `APROVADO`, `RECUSADO` ou `PENDENTE`) e `DecidirPagamentoUseCase`. A única implementação é o
+`GatewayPagamentoHttp` (secret → token → pagamento, com Retry e CircuitBreaker), que por padrão chama o mock deste próprio
+serviço. Outro meio (Mercado Pago) entra como outra implementação da porta, ou trocando URL e credenciais; se a decisão dele
+vier por webhook, ele chama o mesmo `DecidirPagamentoUseCase`.
+
+### Mock do meio de pagamento
+
+Decisão e detalhes no [ADR-0002](docs/adr/0002-mock-do-meio-de-pagamento.md). Sempre ligado, em `/mock-pagamentos` (fora do JWT:
+tem a própria autenticação). Credenciais: `PAGAMENTO_MOCK_CLIENT_ID` / `PAGAMENTO_MOCK_CLIENT_SECRET` (padrão `cobranca` /
+`mock-secret`); o gateway usa as mesmas, salvo se `PAGAMENTO_CLIENT_ID` / `PAGAMENTO_CLIENT_SECRET` forem informados.
+
+| Chamada ao mock | Resposta |
+|---|---|
+| `POST /mock-pagamentos/oauth/token` com `{client_id, client_secret}` | `{access_token, expires_in: 300}`; credencial errada → 401 |
+| `POST /mock-pagamentos/pagamentos` (Bearer) com `{ordemId, valor}` | contador `n % 4`: 1ª e 2ª → 503, 3ª → `APROVADO`, 4ª → `RECUSADO`, recomeça |
+| valor terminado em `.99` | sempre `RECUSADO` (não avança o contador) |
+
+Na prática, com o retry de 3 tentativas: o 1º pagamento é aprovado na 3ª tentativa (os 503 aparecem no log), o 2º é recusado e
+a OS é cancelada (compensação da saga), e o ciclo se repete. Se o meio cair de vez (ex.: `PAGAMENTO_URL` para uma porta
+fechada), o circuito abre depois de 8 chamadas falhas e os pagamentos ficam PENDENTE, ainda decidíveis à mão.
 
 ### Papel na saga
 
@@ -33,10 +52,10 @@ Todos exigem JWT da API principal (mesmo segredo/issuer) com perfil `ATENDENTE` 
 | Método | Rota | O que faz |
 |---|---|---|
 | GET | `/pagamentos/{ordemServicoId}` | consulta o pagamento |
-| POST | `/pagamentos/{ordemServicoId}/aprovar` | decisão simulada: confirma e avisa a OS |
-| POST | `/pagamentos/{ordemServicoId}/recusar` | decisão simulada: recusa e avisa a OS |
+| POST | `/pagamentos/{ordemServicoId}/aprovar` | decisão manual: confirma e avisa a OS |
+| POST | `/pagamentos/{ordemServicoId}/recusar` | decisão manual: recusa e avisa a OS |
 
-`aprovar`/`recusar` só existem com `cobranca.pagamento.simulado.enabled=true` (padrão). Repetir a mesma decisão reenvia a
+`aprovar`/`recusar` servem para o pagamento que ficou PENDENTE porque o meio de pagamento estava fora. Repetir a mesma decisão reenvia a
 resposta à OS (útil se a publicação falhou); decisão contrária à já gravada responde 409.
 
 ### Falhas e riscos aceitos
@@ -54,6 +73,8 @@ resposta à OS (útil se a publicação falhou); decisão contrária à já grav
 | `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` / `RABBITMQ_HOST` / `RABBITMQ_PORT` / `RABBITMQ_VHOST` | broker (o usuário `cobranca` é criado pelo CD do `fiap-estoque`) |
 | `AWS_REGION`, `DYNAMODB_TABELA` | DynamoDB (credenciais pela cadeia padrão da AWS) |
 | `DYNAMODB_ENDPOINT`, `DYNAMODB_CRIAR_TABELA=true` | só local: aponta para o DynamoDB Local e cria a tabela |
+| `PAGAMENTO_URL`, `PAGAMENTO_CLIENT_ID`, `PAGAMENTO_CLIENT_SECRET` | meio de pagamento (padrão: o mock em `localhost:8082/mock-pagamentos`) |
+| `PAGAMENTO_MOCK_CLIENT_ID`, `PAGAMENTO_MOCK_CLIENT_SECRET` | credenciais aceitas pelo mock |
 
 Chave da tabela: `ordemServicoId` (número). Testes: `./mvnw verify` (precisa de Docker: sobe DynamoDB Local e RabbitMQ).
 
@@ -66,17 +87,18 @@ Clean Architecture, igual ao `fiap-estoque` e ao `fiap-mecanica`: `core/` (domí
 - `core/gateway`: portas `PagamentoGateway` (persistência), `PagamentoEventosGateway` (resposta à OS) e `GatewayDePagamento` (meio de pagamento).
 - `core/usecase`: `SolicitarPagamentoUseCase`, `ConsultarPagamentoUseCase` e `DecidirPagamentoUseCase`, com `OutputPort` para devolver o resultado.
 - `core/dto`: dados de entrada dos casos de uso.
-- `infra/controller`: `PagamentoHttpController` e `PagamentoSimuladoHttpController` (Spring, rotas HTTP) chamam o `PagamentoCleanController`
+- `infra/controller`: `PagamentoHttpController` e `PagamentoDecisaoManualHttpController` (Spring, rotas HTTP) chamam o `PagamentoCleanController`
   (Java puro), que monta os casos de uso e devolve o resultado por *presenter* (`infra/controller/presenter`) em um `json/PagamentoResponseJson`.
 - `infra/mensageria`: listener do comando (`SolicitarPagamentoListener`, que usa o mesmo `PagamentoCleanController`) e publicador das respostas.
-- `infra/gateway`: DynamoDB (`PagamentoDynamoGateway`) e o meio de pagamento simulado.
+- `infra/gateway`: DynamoDB (`PagamentoDynamoGateway`) e o meio de pagamento (`GatewayPagamentoHttp`, com Resilience4j).
+- `infra/mockpagamento`: o mock do meio de pagamento.
 - `shared`: exceções, segurança JWT e OpenAPI.
 
 ## Testes e cobertura
 
 `./mvnw verify` roda os testes unitários e os de integração (Testcontainers: DynamoDB Local e RabbitMQ, inclui o fluxo completo da
-saga de pagamento), gera o relatório do JaCoCo e **falha abaixo de 80% de linhas**. Medição de 10/11/2026: **47 testes, 0 falhas,
-97,7% das linhas cobertas** (297/304). Relatório em `target/site/jacoco/index.html`; no CI o resumo aparece na execução e o
+saga de pagamento, com o mock e com a decisão manual), gera o relatório do JaCoCo e **falha abaixo de 80% de linhas**. Medição de
+14/11/2026: **66 testes, 0 falhas, 98,0% das linhas cobertas** (384/392). Relatório em `target/site/jacoco/index.html`; no CI o resumo aparece na execução e o
 relatório HTML é publicado como artefato (`jacoco-report`).
 
 ## Infraestrutura e deploy

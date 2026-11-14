@@ -8,7 +8,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,24 +17,23 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.Clock;
 
 /**
- * Decisão manual do pagamento, no lugar do meio de pagamento real. Protegido por JWT (ATENDENTE ou ADMINISTRADOR) e
- * desligável por {@code cobranca.pagamento.simulado.enabled=false}, o que remove os endpoints.
+ * Decisão manual do pagamento, protegida por JWT (ATENDENTE ou ADMINISTRADOR). Serve para o pagamento que ficou
+ * PENDENTE porque o meio de pagamento estava fora (fallback do {@code GatewayPagamentoHttp}).
  */
 @RestController
 @RequestMapping("/pagamentos")
 @Tag(name = "Pagamento")
-@ConditionalOnProperty(name = "cobranca.pagamento.simulado.enabled", havingValue = "true", matchIfMissing = true)
-public class PagamentoSimuladoHttpController {
+public class PagamentoDecisaoManualHttpController {
 
     private final PagamentoCleanController cleanController;
 
-    public PagamentoSimuladoHttpController(PagamentoGateway pagamentoGateway, PagamentoEventosGateway eventosGateway,
+    public PagamentoDecisaoManualHttpController(PagamentoGateway pagamentoGateway, PagamentoEventosGateway eventosGateway,
                                            GatewayDePagamento gatewayDePagamento, Clock clock) {
         this.cleanController = new PagamentoCleanController(pagamentoGateway, eventosGateway, gatewayDePagamento, clock);
     }
 
     @PostMapping("/{ordemServicoId}/aprovar")
-    @Operation(summary = "Aprova o pagamento (simulado) e avisa a ordem de serviço",
+    @Operation(summary = "Aprova o pagamento manualmente e avisa a ordem de serviço",
             description = "Confirma o pagamento PENDENTE e publica a resposta para a ordem de serviço. Repetir a aprovação reenvia a resposta")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Pagamento confirmado com sucesso"),
@@ -49,7 +47,7 @@ public class PagamentoSimuladoHttpController {
     }
 
     @PostMapping("/{ordemServicoId}/recusar")
-    @Operation(summary = "Recusa o pagamento (simulado) e avisa a ordem de serviço",
+    @Operation(summary = "Recusa o pagamento manualmente e avisa a ordem de serviço",
             description = "Recusa o pagamento PENDENTE e publica a resposta para a ordem de serviço, que é cancelada. Repetir a recusa reenvia a resposta")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Pagamento recusado com sucesso"),

@@ -39,6 +39,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.issuer = issuer;
     }
 
+    /** O mock do meio de pagamento emite e valida o próprio token (não é JWT), como um meio externo faria. */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return request.getRequestURI().startsWith(request.getContextPath() + "/mock-pagamentos/");
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {

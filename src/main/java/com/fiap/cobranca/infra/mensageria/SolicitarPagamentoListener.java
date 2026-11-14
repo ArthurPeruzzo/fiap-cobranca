@@ -42,7 +42,7 @@ public class SolicitarPagamentoListener {
             throw new AmqpRejectAndDontRequeueException("Comando de pagamento invalido: " + e.getMessage(), e);
         }
         if (criado) {
-            log.info("Pagamento da ordem de servico {} registrado como PENDENTE", comando.ordemServicoId());
+            log.info("Pagamento da ordem de servico {} registrado e enviado ao meio de pagamento", comando.ordemServicoId());
         } else {
             log.info("Comando repetido: a ordem de servico {} ja tem pagamento", comando.ordemServicoId());
         }

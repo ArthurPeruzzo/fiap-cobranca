@@ -11,7 +11,7 @@ import java.time.Clock;
 
 /**
  * Decide o pagamento (confirmar ou recusar) e avisa o orquestrador. Quem decide não importa para a regra: o endpoint
- * simulado e, no futuro, o webhook do Mercado Pago chamam o mesmo caso de uso.
+ * manual, o meio de pagamento (pelo SolicitarPagamentoUseCase) e, no futuro, o webhook do Mercado Pago chamam o mesmo caso de uso.
  * <p>
  * Repetir a mesma decisão é permitido e reenvia a resposta: se a publicação falhou depois de gravar o status, o
  * chamador tenta de novo e a resposta sai (risco aceito: gravação e publicação não são atômicas). Decisão contrária à

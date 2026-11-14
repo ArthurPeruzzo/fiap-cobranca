@@ -1,6 +1,7 @@
 package com.fiap.cobranca.infra.controller;
 
 import com.fiap.cobranca.resources.AbstractIntegrationTest;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.AfterEach;
@@ -16,7 +17,6 @@ import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.test.web.server.LocalServerPort;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -28,8 +28,9 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * O fluxo de ponta a ponta da cobrança contra RabbitMQ e DynamoDB reais: comando da OS → pagamento PENDENTE → decisão
- * pelo endpoint protegido → resposta para a OS. Cobre também idempotência, DLQ e a proteção dos endpoints.
+ * O fluxo de ponta a ponta da cobrança contra RabbitMQ e DynamoDB reais quando o meio de pagamento está fora (circuito
+ * forçado aberto): comando da OS → pagamento PENDENTE → decisão manual pelo endpoint protegido → resposta para a OS.
+ * Cobre também idempotência, DLQ e a proteção dos endpoints. O fluxo com o meio no ar está em PagamentoComMockIntegrationTest.
  */
 class PagamentoSagaIntegrationTest extends AbstractIntegrationTest {
 
@@ -38,23 +39,25 @@ class PagamentoSagaIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired private RabbitTemplate rabbitTemplate;
     @Autowired private AmqpAdmin amqpAdmin;
+    @Autowired private CircuitBreakerRegistry circuitBreakers;
 
     @Value("${cobranca.mensageria.exchange}") private String exchange;
     @Value("${cobranca.mensageria.fila.solicitar-pagamento}") private String fila;
     @Value("${cobranca.mensageria.routing-key.solicitar-pagamento}") private String routingKey;
     @Value("${ordemservico.mensageria.exchange}") private String exchangeRespostas;
 
-    @LocalServerPort private int port;
-
     @BeforeEach
     void setup() {
-        RestAssured.port = port;
+        RestAssured.port = PORTA;
+        // Meio de pagamento fora: o fallback deixa o pagamento PENDENTE para a decisão manual.
+        circuitBreakers.circuitBreaker("gatewayPagamento").transitionToForcedOpenState();
         declararFilaDeRespostas();
         amqpAdmin.purgeQueue(fila + ".dlq", true);
     }
 
     @AfterEach
     void limpar() {
+        circuitBreakers.circuitBreaker("gatewayPagamento").reset();
         amqpAdmin.deleteQueue(FILA_RESPOSTAS);
         amqpAdmin.purgeQueue(fila + ".dlq", true);
     }

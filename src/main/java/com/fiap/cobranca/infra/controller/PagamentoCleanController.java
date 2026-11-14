@@ -30,7 +30,7 @@ public class PagamentoCleanController {
 
     /** @return true se criou o pagamento; false se já existia (mensagem duplicada). */
     public boolean solicitar(SolicitarPagamentoDto dto) {
-        return new SolicitarPagamentoUseCase(pagamentoGateway, gatewayDePagamento, clock).solicitar(dto);
+        return new SolicitarPagamentoUseCase(pagamentoGateway, eventosGateway, gatewayDePagamento, clock).solicitar(dto);
     }
 
     public PagamentoResponseJson consultar(Long ordemServicoId) {
